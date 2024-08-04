@@ -1,0 +1,188 @@
+<html lang="en"><head><meta http-equiv="cache-control" content="no-cache"></head>
+<body style="background-color:black; top:0; bottom:0; left:0; right:0; margin:auto"><script>
+	var canvas = document.createElement('canvas');
+	Object.assign ( canvas, { width : 480, height: 270, style: "image-rendering: crisp-edges; position:absolute; top:0; bottom:0; left:0; right:0; margin:auto"})
+	document.body.appendChild ( canvas )
+	var ctx = canvas.getContext("2d");
+	ctx.fillStyle = "#fff"
+	ctx.fillRect(0, 0, canvas.width, canvas.height)
+	//ctx.font = "32px serif";
+	//ctx.fillText("Please paint...", 100, 200);
+	var memory;
+	var app;
+
+	function get_string(ptr, len) {
+		const buf = new Uint8Array(memory.buffer, ptr, len);
+		const str = new TextDecoder("utf8").decode(buf);
+		return str;
+	}
+
+	function get_vstring(ptr) {
+		console.log( ptr )
+		const b = new Uint32Array(memory.buffer, ptr, 2);
+		console.log( b[0] )
+		const buf = new Uint8Array(memory.buffer, b[0], b[1]);
+		const str = new TextDecoder("utf8").decode(buf);
+		return str;
+	}
+
+	//canvas.style.scale = document.body.clientWidth/canvas.width
+	const env = {
+		canvas_x: () => canvas.width,
+		canvas_y: () => canvas.height,
+		setpixel: (x, y, c) => {
+			ctx.fillStyle = "rgba("+c+","+c+","+c+",1)"
+			ctx.fillRect(x, y, 1, 1)
+		},
+		line: (x0,y0,x1,y1,c)=>{
+			ctx.beginPath()
+			ctx.strokeStyle = "rgb("+(c>>16&0xff)+","+(c>>8&0xff)+","+(c&0xff)+")"
+			ctx.moveTo(x0,y0)
+			ctx.lineTo(x1,y1)
+			ctx.stroke()
+		},
+		settitle: (ptr) => {
+			document.title = get_vstring(ptr)
+		},
+		teststr: ( s ) =>{
+			console.log( get_vstring( s ) )
+		},		
+		test: ( rect ) => {
+			const buf = new Int32Array(memory.buffer, rect, 4);
+			var r={
+				x : buf[0],
+				y : buf[1],
+				w : buf[2],
+                                h : buf[3],
+				}
+			console.log( r )
+			ctx.fillStyle = "rgba("+255+","+255+","+255+",1)"
+			ctx.fillRect(r.x, r.y, r.w, r.h)
+		},
+		init: ( a ) => {
+			app=a 
+		},
+		__writeln: (ptr, len) => {
+			console.log(get_string(ptr, len));
+		},
+		__write: (ptr, len) => {
+			console.log(get_string(ptr, len));
+		},		
+		__panic_abort: (ptr, len) => {
+			throw get_string(ptr, len);
+		},
+	};
+
+	WebAssembly.instantiateStreaming(fetch("fire.wasm"), {
+		env: env,
+	}).then((res) => {
+		console.time("main.main")
+		console.log(env.canvas_x())
+		console.log(env.canvas_y())
+		memory = res.instance.exports.memory
+		env.init = (a) => {app=a}
+		const imageData = ctx.createImageData(480, 270);
+
+		f_mouse_down = res.instance.exports["main.App.mousedown"]
+		f_mouse_up   = res.instance.exports["main.App.mouseup"]
+		f_mouse_move = res.instance.exports["main.App.mousemove"]
+		f_key_down   = res.instance.exports["main.App.keydown"]
+		f_key_up     = res.instance.exports["main.App.keyup"]
+		f_draw	     = res.instance.exports["main.App.draw"]
+
+		// Mouse events
+		canvas.addEventListener ( "mousedown", (event) => {
+			let s = !document.fullscreen + document.fullscreen * canvas.width/canvas.getBoundingClientRect().width
+			f_mouse_down ( app, s*event.offsetX, s*event.offsetY )
+		} )
+		canvas.addEventListener ( "mouseup",   (event) => {
+			let s = !document.fullscreen + document.fullscreen * canvas.width/canvas.getBoundingClientRect().width
+			f_mouse_up ( app, s*event.offsetX, s*event.offsetY )	
+		} )
+		canvas.addEventListener ( "mousemove", (event) => {
+			let s = !document.fullscreen + document.fullscreen * canvas.width/canvas.getBoundingClientRect().width
+			f_mouse_move ( app, event.offsetX*s, event.offsetY*s )
+		})
+		console.log( res.instance.exports.memory )
+		// Touch events
+		canvas.addEventListener ( "touchstart", (event) => {
+			var touch = event.touches[0]
+			var mouseEvent = new MouseEvent("mousedown", {
+                                clientX: touch.clientX, clientY: touch.clientY
+                        })
+                        canvas.dispatchEvent(mouseEvent)
+		}, false )
+		canvas.addEventListener ( "touchmove", (event) => {
+			var touch = event.touches[0];
+			let s = !document.fullscreen + document.fullscreen * 480.0/canvas.width
+			var mouseEvent = new MouseEvent("mousemove", {
+				clientX: s*touch.clientX, clientY: s*touch.clientY
+			})
+			canvas.dispatchEvent(mouseEvent)
+		}, false )
+		canvas.addEventListener ( "touchend", (event) => {
+                        var touch = event.touches[0];
+                        var mouseEvent = new MouseEvent("mouseup", {
+                                clientX: touch.clientX, clientY: touch.clientY
+                        })
+                        canvas.dispatchEvent(mouseEvent)
+                }, false )
+
+		// TODO: umozliwic sterowanie paleta kolorow z WASM
+		let palette=[]
+		for( let c=0;c<256;c++){
+			let cr=0, cg=0, cb=0
+                        if ( c<64 ) { cr=c*255/63;}
+                        else if ( c<64*2 ) {cr=255; cg=255*(c-64)/63 }
+                        else { cr=255; cg=255; cb=255*(c-2*64)/63 }
+			palette[c] = (0xff<<24) | (cb<<16) | (cg<<8) | cr
+		}
+
+
+		addEventListener ( "keydown",   (event) => {				
+				let ofs = 0x0
+				console.log(event.key, event.code)
+				kl = event.key.length
+				new Uint8Array(res.instance.exports.memory.buffer,ofs).set( new TextEncoder().encode( event.key ), 0 )
+				new Uint8Array(res.instance.exports.memory.buffer,ofs).set( new TextEncoder().encode( event.code ), kl+1 )
+				f_key_down ( app, ofs, ofs+kl+1 )
+
+
+				// test only
+				f_draw(app)
+				let img = new Uint8Array ( res.instance.exports.memory.buffer, app+16, 480*270 )
+				let pixels = new Int32Array( imageData.data.buffer )
+				for ( let i=0; i<480*270; i++ ) {
+				     pixels[i] = palette[img[i]]
+				      
+				}
+				ctx.putImageData( imageData,0,0)
+
+		} )
+		addEventListener ( "keyup",   (event) => {
+				let ofs = 0x0
+				let kl = event.key.length
+				let cl = event.code.length
+				new Uint8Array(res.instance.exports.memory.buffer,ofs).set( new TextEncoder().encode( event.key+'\0' ), 0 )
+				new Uint8Array(res.instance.exports.memory.buffer,ofs).set( new TextEncoder().encode( event.code+'\0' ), kl+1 )
+				f_key_up ( app, ofs, ofs+kl+1 )
+		} )
+
+		res.instance.exports["main.main"]()
+		console.timeEnd("main.main")
+		setInterval(()=>{ 
+			f_draw(app)
+			let img = new Uint8Array ( res.instance.exports.memory.buffer, app+16, 480*270 )
+			let pixels= new Int32Array( imageData.data.buffer )
+                        for ( let i=0; i < 480*270; i++ ) {
+				pixels[i] = palette[img[i]]
+                        }
+                        ctx.putImageData( imageData,0,0)
+		}, 20)
+	});
+	
+	//var video = document.getElementById("canvas");
+	canvas.addEventListener("click", () => {
+	 canvas.requestFullscreen()
+	})  
+</script></body></html>
