@@ -2,4 +2,4 @@
 Old school fire effect ported to the web from Mode X
 
 ## Hot to use
-[Demo](https://sewerynkaminski.github.com/Fire-in-V-WASM-Demo)
+[Demo](https://sewerynkaminski.github.io/Fire-in-V-WASM-Demo)
